@@ -8,8 +8,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Veb-server ${PORT}-portda ishga tushdi`));
 
 // --- BOT KODI ---
-const token = 'SIZNING_BOT_TOKENINGIZ'; // Tokenni kiriting
-const adminId = 'SIZNING_TELEGRAM_ID_RAQAMINGIZ'; // ID ni kiriting
+const token = '8832573550:AAFeIotInXzGiCwKTMBqhwMGos-DnTbMi-o'; // Tokenni kiriting
+const adminId = '6891409491'; // ID ni kiriting
 
 const bot = new TelegramBot(token, {polling: true});
 
