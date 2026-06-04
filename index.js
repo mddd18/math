@@ -1,147 +1,175 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
-// Bepul server (Render) uxlab qolmasligi uchun Veb-server
 const app = express();
 app.get('/', (req, res) => res.send('Bot 24/7 ishlayapti!'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Veb-server ${PORT}-portda ishga tushdi`));
 
 // --- BOT KODI ---
-const token = '8832573550:AAFeIotInXzGiCwKTMBqhwMGos-DnTbMi-o'; // Tokenni kiriting
-const adminId = '6891409491'; // ID ni kiriting
+const token = '8832573550:AAFeIotInXzGiCwKTMBqhwMGos-DnTbMi-o';
+const adminId = '717163719';
 
 const bot = new TelegramBot(token, {polling: true});
 
-// Xotiradagi ma'lumotlar
-let activeTests = {}; // { '1': { keys: 'abcd...', count: 30 } }
+let activeTests = {}; // { '4092': { keys: 'abcd...', count: 30 } }
 let registeredUsers = {}; 
 let adminState = null; 
-let tempTestCount = 0; // Admin kiritgan savollar sonini ushlab turish uchun
+let tempTestCount = 0; 
+let userSessions = {}; // O'quvchilarning test yechish jarayonini saqlash uchun
 
+// ==========================================
+// XABARLARNI QABUL QILISH
+// ==========================================
 bot.on('message', (msg) => {
   const chatId = msg.chat.id.toString();
   const text = msg.text;
 
   if (!text) return;
 
-  // ==========================================
-  // 1. ADMIN QISMI
-  // ==========================================
+  // --- ADMIN QISMI ---
   if (chatId === adminId) {
-    
-    // Asosiy menyu
     if (text === '/start') {
       adminState = null; 
-      return bot.sendMessage(adminId, `Ассалаўма алейкум, Админ! Басқарыў панельине хош келдиңиз.`, {
-        reply_markup: {
-          keyboard: [[{ text: '📝 Жаңа тест жаратыў' }]],
-          resize_keyboard: true
-        }
+      return bot.sendMessage(adminId, `Admin paneliga xush kelibsiz.`, {
+        reply_markup: { keyboard: [[{ text: '📝 Yangi test yaratish' }]], resize_keyboard: true }
       });
     }
 
-    // 1-bosqich: Savollar sonini so'rash
-    if (text === '📝 Жаңа тест жаратыў') {
+    if (text === '📝 Yangi test yaratish') {
       adminState = 'WAITING_FOR_COUNT'; 
-      return bot.sendMessage(adminId, `Бул тест неше сораўдан ибарат болады?\n\nИлтимас, тек сан киргизиң (мәселен: 30)`);
+      return bot.sendMessage(adminId, `Ushbu test nechta savoldan iborat bo'ladi? (Raqam kiriting)`);
     }
 
-    // 2-bosqich: Sonini qabul qilib, kalitlarni so'rash
     if (adminState === 'WAITING_FOR_COUNT') {
       const count = parseInt(text);
       if (!isNaN(count) && count > 0) {
-        tempTestCount = count; // Sonini xotiraga olamiz
-        adminState = 'WAITING_FOR_TEST';
-        return bot.sendMessage(adminId, `әжайып! Тест сораўлары саны: ${count}.\n\nЕнди тест гилтлерин төмендеги форматта жибериң:\n[Тест_номери] [жуўаплар]\n\nМысал ушын: 1 ${'a'.repeat(Math.min(count, 5))}...`);
-      } else {
-        return bot.sendMessage(adminId, `⚠️ Надурис мәнис. Сораўлар санын цифрда киргизиң (Мысалы: 25).`);
+        tempTestCount = count;
+        adminState = 'WAITING_FOR_KEYS';
+        return bot.sendMessage(adminId, `✅ Savollar soni: ${count} ta.\n\nEndi faqat javoblarni (kalitlarni) yuboring.\nMisol: ${'a'.repeat(Math.min(count, 5))}...`);
       }
     }
 
-    // 3-bosqich: Testni saqlash
-    if (adminState === 'WAITING_FOR_TEST') {
-      const parts = text.split(' ');
-      
-      if (parts.length === 2 && !isNaN(parts[0])) {
-        const testId = parts[0];
-        const answers = parts[1].toLowerCase();
-        
-        // Uzunlik admin boshida aytgan songa tengligini tekshiramiz
-        if (answers.length === tempTestCount) {
-          activeTests[testId] = {
-            keys: answers,
-            count: tempTestCount
-          };
-          adminState = null; 
-          return bot.sendMessage(adminId, `✅ ${testId}-санлы тест базаға қабыл етилди!\nСораўлар саны: ${tempTestCount} \n🔑 гилтлер: ${answers}`);
-        } else {
-          return bot.sendMessage(adminId, `⚠️ Javoblar soni aniq ${tempTestCount} ta bo'lishi kerak. Siz ${answers.length} ta kiritdingiz. Qaytadan kiriting.`);
-        }
+    if (adminState === 'WAITING_FOR_KEYS') {
+      const answers = text.toLowerCase();
+      if (answers.length === tempTestCount) {
+        // Avtomatik ID generatsiya qilish (1000 dan 9999 gacha)
+        const testId = Math.floor(1000 + Math.random() * 9000).toString(); 
+        activeTests[testId] = { keys: answers, count: tempTestCount };
+        adminState = null; 
+        return bot.sendMessage(adminId, `🎉 Test tayyor!\n\n📌 **Test kodi: ${testId}**\n📝 Savollar soni: ${tempTestCount} ta\n🔑 Kalitlar: ${answers}\n\nO'quvchilarga shu kodni bering.`, {parse_mode: 'Markdown'});
       } else {
-        return bot.sendMessage(adminId, `📝 Noto'g'ri format. Iltimos, [Test_raqami] va [Javoblar] ni orasida joy tashlab yuboring.`);
+        return bot.sendMessage(adminId, `⚠️ Javoblar soni aniq ${tempTestCount} ta bo'lishi kerak. Siz ${answers.length} ta yozdingiz.`);
       }
     }
-    
-    return; 
+    return;
   }
 
-  // ==========================================
-  // 2. FOYDALANUVCHI (O'QUVCHI) QISMI
-  // ==========================================
+  // --- FOYDALANUVCHI QISMI ---
   if (chatId !== adminId) {
-    
     if (text === '/start') {
-      return bot.sendMessage(chatId, `Assalomu alaykum! Test ishlashdan oldin, iltimos, **Ism va Familiyangizni** to'liq yozib yuboring:\n\n(Misol uchun: Aliyev Vali)`, {parse_mode: 'Markdown'});
+      return bot.sendMessage(chatId, `Assalomu alaykum! Iltimos, **Ism va Familiyangizni** yozib yuboring:`, {parse_mode: 'Markdown'});
     }
 
+    // Ro'yxatdan o'tish
     if (!registeredUsers[chatId]) {
-      const parts = text.split(' ');
-      if (parts.length === 2 && !isNaN(parts[0]) && activeTests[parts[0]]) {
-        return bot.sendMessage(chatId, `⚠️ Siz hali ismingizni kiritmadingiz. Iltimos, avval Ism va Familiyangizni yozib yuboring!`);
-      }
-
       registeredUsers[chatId] = text;
-      return bot.sendMessage(chatId, `✅ Rahmat, ${text}!\n\nEndi test javoblarini quyidagi formatda yuborishingiz mumkin:\n[Test_raqami] [Javoblaringiz]`);
+      return bot.sendMessage(chatId, `✅ Rahmat, ${text}!\n\nTest ishlash uchun ustozingiz bergan **Test kodini** (masalan: 4092) yozib yuboring:`);
     }
 
-    const parts = text.split(' ');
-    if (parts.length === 2 && !isNaN(parts[0])) {
-      const testId = parts[0];
-      const userAnswers = parts[1].toLowerCase();
-
+    // Test kodini kiritish va testni boshlash
+    if (!userSessions[chatId] || userSessions[chatId].status === 'finished') {
+      const testId = text;
       if (activeTests[testId]) {
-        const testInfo = activeTests[testId]; // Testning kalitlari va sonini olamiz
-        
-        if (userAnswers.length === testInfo.count) {
-          const correctAnswers = testInfo.keys;
-          let score = 0;
-          let wrongIndexes = [];
-
-          for (let i = 0; i < testInfo.count; i++) {
-            if (userAnswers[i] === correctAnswers[i]) {
-              score++;
-            } else {
-              wrongIndexes.push(i + 1);
-            }
-          }
-
-          const studentName = registeredUsers[chatId]; 
-
-          // Natija faqat Adminga boradi
-          const resultMsg = `📊 Yangi natija!\n👤 O'quvchi: ${studentName}\n📝 Test: ${testId}\n✅ To'g'ri: ${score}/${testInfo.count}\n❌ Xato savollar: ${wrongIndexes.length > 0 ? wrongIndexes.join(', ') : 'Yo\'q'}`;
-          bot.sendMessage(adminId, resultMsg);
-          
-          // O'quvchiga faqat qabul qilinganligi haqida xabar boradi
-          bot.sendMessage(chatId, `✅ Javoblaringiz qabul qilindi va tekshiruvchiga yuborildi.`);
-        } else {
-          bot.sendMessage(chatId, `⚠️ Bu test aniq ${testInfo.count} ta savoldan iborat. Siz ${userAnswers.length} ta yozdingiz.`);
-        }
+        userSessions[chatId] = {
+          testId: testId,
+          currentQuestion: 1,
+          answers: [],
+          status: 'active'
+        };
+        sendQuestion(chatId);
       } else {
-        bot.sendMessage(chatId, `❌ ${testId}-raqamli test bazada topilmadi.`);
+        bot.sendMessage(chatId, `❌ ${testId} kodli test topilmadi. Kodni to'g'ri yozganingizni tekshiring.`);
       }
-    } else {
-      bot.sendMessage(chatId, `⚠️ Noto'g'ri format. Iltimos, [Test_raqami] [Javoblaringiz] ko'rinishida yozing.`);
     }
   }
 });
+
+// ==========================================
+// INLINE TUGMALARNI BOSHQARISH (A, B, C, D)
+// ==========================================
+bot.on('callback_query', (query) => {
+  const chatId = query.message.chat.id.toString();
+  const data = query.data; // Bosilgan tugma (a, b, c, d)
+  const session = userSessions[chatId];
+
+  if (!session || session.status !== 'active') return;
+
+  const testInfo = activeTests[session.testId];
+  
+  // Javobni saqlaymiz
+  session.answers.push(data);
+
+  // Keyingi savolga o'tamiz
+  session.currentQuestion++;
+
+  if (session.currentQuestion <= testInfo.count) {
+    // Xabarni yangilaymiz (keyingi savol raqamini chiqaramiz)
+    bot.editMessageText(`📝 Test: ${session.testId}\n📌 Savol: ${session.currentQuestion} / ${testInfo.count}\n\nJavob variantini tanlang:`, {
+      chat_id: chatId,
+      message_id: query.message.message_id,
+      reply_markup: getKeyboard()
+    });
+  } else {
+    // Test tugadi, natijani hisoblaymiz
+    session.status = 'finished';
+    
+    let score = 0;
+    let wrongIndexes = [];
+    const correctAnswers = testInfo.keys;
+
+    for (let i = 0; i < testInfo.count; i++) {
+      if (session.answers[i] === correctAnswers[i]) {
+        score++;
+      } else {
+        wrongIndexes.push(i + 1);
+      }
+    }
+
+    const studentName = registeredUsers[chatId];
+    const userAnswersStr = session.answers.join('');
+
+    // Xabarni o'zgartiramiz
+    bot.editMessageText(`✅ Test yakunlandi!\nJavoblaringiz adminga yuborildi.`, {
+      chat_id: chatId,
+      message_id: query.message.message_id
+    });
+
+    // Adminga natijani yuborish
+    const resultMsg = `📊 Yangi natija!\n👤 O'quvchi: ${studentName}\n📝 Test kodi: ${session.testId}\n✅ To'g'ri: ${score}/${testInfo.count}\n❌ Xato savollar: ${wrongIndexes.length > 0 ? wrongIndexes.join(', ') : 'Yo\'q'}\n📥 O'quvchi javoblari: ${userAnswersStr}`;
+    bot.sendMessage(adminId, resultMsg);
+  }
+
+  // Tugma bosilganda "loading" ni yo'qotish
+  bot.answerCallbackQuery(query.id);
+});
+
+// Klaviaturani yasab beruvchi funksiya
+function getKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: 'A', callback_data: 'a' }, { text: 'B', callback_data: 'b' }],
+      [{ text: 'C', callback_data: 'c' }, { text: 'D', callback_data: 'd' }]
+    ]
+  };
+}
+
+// Savolni yuboruvchi funksiya
+function sendQuestion(chatId) {
+  const session = userSessions[chatId];
+  const total = activeTests[session.testId].count;
+  
+  bot.sendMessage(chatId, `📝 Test: ${session.testId}\n📌 Savol: ${session.currentQuestion} / ${total}\n\nJavob variantini tanlang:`, {
+    reply_markup: getKeyboard()
+  });
+}
