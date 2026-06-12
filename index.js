@@ -8,7 +8,7 @@ app.listen(PORT, () => console.log(`Veb-server ${PORT}-portda ishga tushdi`));
 
 // --- BOT KODI ---
 const token = '8832573550:AAFeIotInXzGiCwKTMBqhwMGos-DnTbMi-o';
-const adminId = '717163719';
+const adminId = '903004024';
 
 const bot = new TelegramBot(token, {polling: true});
 
