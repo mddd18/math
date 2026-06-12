@@ -12,11 +12,11 @@ const adminId = '903004024';
 
 const bot = new TelegramBot(token, {polling: true});
 
-let activeTests = {}; // { '4092': { keys: 'abcd...', count: 30 } }
+let activeTests = {}; 
 let registeredUsers = {}; 
 let adminState = null; 
 let tempTestCount = 0; 
-let userSessions = {}; // O'quvchilarning test yechish jarayonini saqlash uchun
+let userSessions = {}; 
 
 // ==========================================
 // XABARLARNI QABUL QILISH
@@ -53,7 +53,6 @@ bot.on('message', (msg) => {
     if (adminState === 'WAITING_FOR_KEYS') {
       const answers = text.toLowerCase();
       if (answers.length === tempTestCount) {
-        // Avtomatik ID generatsiya qilish (1000 dan 9999 gacha)
         const testId = Math.floor(1000 + Math.random() * 9000).toString(); 
         activeTests[testId] = { keys: answers, count: tempTestCount };
         adminState = null; 
@@ -67,17 +66,25 @@ bot.on('message', (msg) => {
 
   // --- FOYDALANUVCHI QISMI ---
   if (chatId !== adminId) {
+    
+    // /start bosilganda tekshiruv
     if (text === '/start') {
-      return bot.sendMessage(chatId, `Assalomu alaykum! Iltimos, **Ism va Familiyangizni** yozib yuboring:`, {parse_mode: 'Markdown'});
+      if (registeredUsers[chatId]) {
+        // Agar oldin ro'yxatdan o'tgan bo'lsa, to'g'ridan-to'g'ri test so'raymiz
+        return bot.sendMessage(chatId, `👋 Qaytganingiz bilan, ${registeredUsers[chatId]}!\n\nTest ishlash uchun **Test kodini** (masalan: 4092) yozib yuboring:`);
+      } else {
+        // Agar yangi foydalanuvchi bo'lsa, ismini so'raymiz
+        return bot.sendMessage(chatId, `Assalomu alaykum! Iltimos, **Ism va Familiyangizni** to'liq yozib yuboring:\n\n(Misol uchun: Aliyev Vali)`);
+      }
     }
 
-    // Ro'yxatdan o'tish
+    // Ismini xotiraga saqlash (faqat birinchi marta kiritganda)
     if (!registeredUsers[chatId]) {
       registeredUsers[chatId] = text;
-      return bot.sendMessage(chatId, `✅ Rahmat, ${text}!\n\nTest ishlash uchun ustozingiz bergan **Test kodini** (masalan: 4092) yozib yuboring:`);
+      return bot.sendMessage(chatId, `✅ Rahmat, ${text}!\n\nEndi test ishlash uchun ustozingiz bergan **Test kodini** yozib yuboring:`);
     }
 
-    // Test kodini kiritish va testni boshlash
+    // Test kodini qabul qilish va testni boshlash
     if (!userSessions[chatId] || userSessions[chatId].status === 'finished') {
       const testId = text;
       if (activeTests[testId]) {
@@ -100,28 +107,23 @@ bot.on('message', (msg) => {
 // ==========================================
 bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id.toString();
-  const data = query.data; // Bosilgan tugma (a, b, c, d)
+  const data = query.data; 
   const session = userSessions[chatId];
 
   if (!session || session.status !== 'active') return;
 
   const testInfo = activeTests[session.testId];
   
-  // Javobni saqlaymiz
   session.answers.push(data);
-
-  // Keyingi savolga o'tamiz
   session.currentQuestion++;
 
   if (session.currentQuestion <= testInfo.count) {
-    // Xabarni yangilaymiz (keyingi savol raqamini chiqaramiz)
     bot.editMessageText(`📝 Test: ${session.testId}\n📌 Savol: ${session.currentQuestion} / ${testInfo.count}\n\nJavob variantini tanlang:`, {
       chat_id: chatId,
       message_id: query.message.message_id,
       reply_markup: getKeyboard()
     });
   } else {
-    // Test tugadi, natijani hisoblaymiz
     session.status = 'finished';
     
     let score = 0;
@@ -139,22 +141,18 @@ bot.on('callback_query', (query) => {
     const studentName = registeredUsers[chatId];
     const userAnswersStr = session.answers.join('');
 
-    // Xabarni o'zgartiramiz
     bot.editMessageText(`✅ Test yakunlandi!\nJavoblaringiz adminga yuborildi.`, {
       chat_id: chatId,
       message_id: query.message.message_id
     });
 
-    // Adminga natijani yuborish
     const resultMsg = `📊 Yangi natija!\n👤 O'quvchi: ${studentName}\n📝 Test kodi: ${session.testId}\n✅ To'g'ri: ${score}/${testInfo.count}\n❌ Xato savollar: ${wrongIndexes.length > 0 ? wrongIndexes.join(', ') : 'Yo\'q'}\n📥 O'quvchi javoblari: ${userAnswersStr}`;
     bot.sendMessage(adminId, resultMsg);
   }
 
-  // Tugma bosilganda "loading" ni yo'qotish
   bot.answerCallbackQuery(query.id);
 });
 
-// Klaviaturani yasab beruvchi funksiya
 function getKeyboard() {
   return {
     inline_keyboard: [
@@ -164,7 +162,6 @@ function getKeyboard() {
   };
 }
 
-// Savolni yuboruvchi funksiya
 function sendQuestion(chatId) {
   const session = userSessions[chatId];
   const total = activeTests[session.testId].count;
