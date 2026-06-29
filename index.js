@@ -12,10 +12,13 @@ const adminId = '903004024';
 const bot = new TelegramBot(token, {polling: true});
 
 // --- MA'LUMOTLAR BAZASI (Xotirada) ---
-let groups = {}; // Format: { "5566": "101-guruh" }
-let users = {}; // Format: { chatId: { name: "Ali", groupCode: "5566" } }
-let tests = {}; // Format: { "1234": { title: "Matematika", count: 10, keys: "abcd...", createdAt: 168... } }
-let results = {}; // Format: { "1234": [ { name: "Ali", groupCode: "5566", score: 8 } ] }
+let groups = {}; // { "5566": "101-guruh" }
+let users = {}; // { chatId: { name: "Ali", groupCode: "5566" } }
+let tests = {}; // { "1234": { title: "Matematika", count: 10, keys: "abcd...", createdAt: 168... } }
+
+// NATIJALAR BAZASI (Guruh kesimida saqlanadi)
+// Format: { "1234" (TestID): { "5566" (GuruhKodi): [ { name: "Ali", score: 8 } ] } }
+let results = {}; 
 
 // Vaqtinchalik holatlar
 let adminState = null;
@@ -60,7 +63,7 @@ bot.on('message', (msg) => {
       const groupCode = Math.floor(1000 + Math.random() * 9000).toString();
       groups[groupCode] = text;
       adminState = null;
-      return bot.sendMessage(adminId, `✅ Guruh yaratildi!\n\n🏢 Nom: ${text}\n🔐 **Kirish kodi: ${groupCode}**\n\nO'quvchilarga ro'yxatdan o'tishlari uchun shu kirish kodini bering.`, {parse_mode: 'Markdown'});
+      return bot.sendMessage(adminId, `✅ Guruh yaratildi!\n\n🏢 Nom: ${text}\n🔐 **Kirish kodi: ${groupCode}**\n\nO'quvchilarga ro'yxatdan o'tishlari uchun shu kodni bering.`, {parse_mode: 'Markdown'});
     }
 
     // 2. TEST YARATISH
@@ -90,11 +93,13 @@ bot.on('message', (msg) => {
           title: adminTempData.topic,
           count: adminTempData.count, 
           keys: answers,
-          createdAt: Date.now() // Vaqtni saqlaymiz (24 soat uchun)
+          createdAt: Date.now()
         };
-        results[testId] = []; // Natijalar uchun bo'sh massiv
-        adminState = null; 
         
+        // Test uchun bo'sh ob'ekt yaratamiz (ichiga guruhlar qo'shilib boradi)
+        results[testId] = {}; 
+        
+        adminState = null; 
         return bot.sendMessage(adminId, `🎉 Test tayyor!\n\n📁 Mavzu: ${adminTempData.topic}\n📌 **Test ID: ${testId}**\n📝 Savollar: ${adminTempData.count} ta\n⏳ Vaqt: 24 soat faol.\n\nO'quvchilarga **${testId}** kodini bering.`, {parse_mode: 'Markdown'});
       } else {
         return bot.sendMessage(adminId, `⚠️ Javoblar soni aniq ${adminTempData.count} ta bo'lishi kerak. Siz ${answers.length} ta yozdingiz.`);
@@ -112,27 +117,24 @@ bot.on('message', (msg) => {
         return bot.sendMessage(adminId, `❌ Bunday ID ga ega test topilmadi.`);
       }
       
-      const testResults = results[testId] || [];
-      if (testResults.length === 0) {
+      const testResultsByGroup = results[testId];
+      if (!testResultsByGroup || Object.keys(testResultsByGroup).length === 0) {
         adminState = null;
         return bot.sendMessage(adminId, `📁 **${tests[testId].title}**\nHali hech kim bu testni yechmadi.`, {parse_mode: 'Markdown'});
       }
 
-      // Natijalarni guruhlar bo'yicha taqsimlash
-      let grouped = {};
-      testResults.forEach(res => {
-        const groupName = groups[res.groupCode] || "Noma'lum guruh";
-        if (!grouped[groupName]) grouped[groupName] = [];
-        grouped[groupName].push(res);
-      });
-
       let reportMsg = `📊 **Natijalar: ${tests[testId].title}** (ID: ${testId})\n\n`;
       
-      for (let gName in grouped) {
+      // Guruhlar bo'ylab aylanib chiqamiz
+      for (let gCode in testResultsByGroup) {
+        const gName = groups[gCode] || "Noma'lum guruh (O'chirilgan)";
         reportMsg += `🏢 **--- ${gName} ---**\n`;
-        // Ballga qarab saralash (yuqoridan pastga)
-        grouped[gName].sort((a, b) => b.score - a.score);
-        grouped[gName].forEach((r, index) => {
+        
+        // O'sha guruh o'quvchilarini olamiz va balliga qarab saralaymiz
+        let students = testResultsByGroup[gCode];
+        students.sort((a, b) => b.score - a.score);
+        
+        students.forEach((r, index) => {
           reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count}\n`;
         });
         reportMsg += `\n`;
@@ -165,13 +167,15 @@ bot.on('message', (msg) => {
         const testData = tests[testId];
 
         if (testData) {
-          // 24 soatlik muddatni tekshirish
+          // 24 soatlik limitni tekshirish
           if (Date.now() - testData.createdAt > ONE_DAY_MS) {
             return bot.sendMessage(chatId, `⏳ Kechirasiz, ushbu testning faollik muddati (24 soat) tugagan.`);
           }
           
           // O'quvchi oldin bu testni ishlaganligini tekshirish
-          const alreadyTaken = results[testId].find(r => r.chatId === chatId);
+          const groupResults = results[testId][users[chatId].groupCode] || [];
+          const alreadyTaken = groupResults.find(r => r.chatId === chatId);
+          
           if (alreadyTaken) {
             return bot.sendMessage(chatId, `❌ Siz bu testni allaqachon ishlagansiz. Qayta ishlash mumkin emas.`);
           }
@@ -200,9 +204,8 @@ bot.on('message', (msg) => {
     if (userRegState[chatId]?.step === 'WAITING_CODE') {
       const code = text.trim();
       if (groups[code]) {
-        // Tizimga saqlash
         users[chatId] = { name: userRegState[chatId].name, groupCode: code };
-        delete userRegState[chatId]; // Vaqtinchalik holatni tozalash
+        delete userRegState[chatId]; 
         
         return bot.sendMessage(chatId, `🎉 Tabriklaymiz, siz **${groups[code]}** guruhiga qabul qilindingiz!\n\nTest ishlash uchun **Test ID** raqamini yozib yuboring:`, {parse_mode: 'Markdown'});
       } else {
@@ -246,11 +249,14 @@ bot.on('callback_query', (query) => {
 
     const userData = users[chatId];
     
-    // Natijani bazaga saqlash (Adminga xabar yubormaymiz)
-    results[session.testId].push({
+    // Natijani Guruh Kesimida bazaga saqlash
+    if (!results[session.testId][userData.groupCode]) {
+      results[session.testId][userData.groupCode] = []; // Agar guruh ro'yxati hali ochilmagan bo'lsa, ochamiz
+    }
+
+    results[session.testId][userData.groupCode].push({
       chatId: chatId,
       name: userData.name,
-      groupCode: userData.groupCode,
       score: score,
       answers: session.answers.join('')
     });
