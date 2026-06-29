@@ -6,17 +6,35 @@ app.get('/', (req, res) => res.send('Bot 24/7 ishlayapti!'));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Veb-server ${PORT}-portda ishga tushdi`));
 
-// --- BOT KODI ---
+// --- BOT SOZLAMALARI ---
 const token = '8832573550:AAFeIotInXzGiCwKTMBqhwMGos-DnTbMi-o';
-const adminId = '212800037';
-
+const adminId = '903004024';
 const bot = new TelegramBot(token, {polling: true});
 
-let activeTests = {}; 
-let registeredUsers = {}; 
-let adminState = null; 
-let tempTestCount = 0; 
+// --- MA'LUMOTLAR BAZASI (Xotirada) ---
+let groups = {}; // Format: { "5566": "101-guruh" }
+let users = {}; // Format: { chatId: { name: "Ali", groupCode: "5566" } }
+let tests = {}; // Format: { "1234": { title: "Matematika", count: 10, keys: "abcd...", createdAt: 168... } }
+let results = {}; // Format: { "1234": [ { name: "Ali", groupCode: "5566", score: 8 } ] }
+
+// Vaqtinchalik holatlar
+let adminState = null;
+let adminTempData = {};
+let userRegState = {}; 
 let userSessions = {}; 
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Admin klaviaturasi
+const adminKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '📝 Yangi test yaratish' }, { text: '🏢 Yangi guruh yaratish' }],
+      [{ text: '📊 Natijalarni ko\'rish' }, { text: '📋 Baza holati' }]
+    ],
+    resize_keyboard: true
+  }
+};
 
 // ==========================================
 // XABARLARNI QABUL QILISH
@@ -24,79 +42,171 @@ let userSessions = {};
 bot.on('message', (msg) => {
   const chatId = msg.chat.id.toString();
   const text = msg.text;
-
   if (!text) return;
 
-  // --- ADMIN QISMI ---
+  // ================= ADMIN QISMI =================
   if (chatId === adminId) {
     if (text === '/start') {
       adminState = null; 
-      return bot.sendMessage(adminId, `Admin paneliga xush kelibsiz.`, {
-        reply_markup: { keyboard: [[{ text: '📝 Yangi test yaratish' }]], resize_keyboard: true }
-      });
+      return bot.sendMessage(adminId, `👨‍💻 Admin paneliga xush kelibsiz!`, adminKeyboard);
     }
 
+    // 1. GURUH YARATISH
+    if (text === '🏢 Yangi guruh yaratish') {
+      adminState = 'WAITING_GROUP_NAME';
+      return bot.sendMessage(adminId, `Guruh nomini yozing (Masalan: 101-guruh):`);
+    }
+    if (adminState === 'WAITING_GROUP_NAME') {
+      const groupCode = Math.floor(1000 + Math.random() * 9000).toString();
+      groups[groupCode] = text;
+      adminState = null;
+      return bot.sendMessage(adminId, `✅ Guruh yaratildi!\n\n🏢 Nom: ${text}\n🔐 **Kirish kodi: ${groupCode}**\n\nO'quvchilarga ro'yxatdan o'tishlari uchun shu kirish kodini bering.`, {parse_mode: 'Markdown'});
+    }
+
+    // 2. TEST YARATISH
     if (text === '📝 Yangi test yaratish') {
-      adminState = 'WAITING_FOR_COUNT'; 
-      return bot.sendMessage(adminId, `Ushbu test nechta savoldan iborat bo'ladi? (Raqam kiriting)`);
+      adminState = 'WAITING_TEST_TOPIC';
+      return bot.sendMessage(adminId, `Test qaysi mavzuda bo'ladi? (Mavzu nomini yozing):`);
     }
-
+    if (adminState === 'WAITING_TEST_TOPIC') {
+      adminTempData.topic = text;
+      adminState = 'WAITING_FOR_COUNT';
+      return bot.sendMessage(adminId, `Bu test nechta savoldan iborat bo'ladi? (Raqam kiriting):`);
+    }
     if (adminState === 'WAITING_FOR_COUNT') {
       const count = parseInt(text);
       if (!isNaN(count) && count > 0) {
-        tempTestCount = count;
+        adminTempData.count = count;
         adminState = 'WAITING_FOR_KEYS';
-        return bot.sendMessage(adminId, `✅ Savollar soni: ${count} ta.\n\nEndi faqat javoblarni (kalitlarni) yuboring.\nMisol: ${'a'.repeat(Math.min(count, 5))}...`);
+        return bot.sendMessage(adminId, `✅ Savollar soni: ${count} ta.\n\nEndi javoblarni (kalitlarni) yuboring.\nMisol: ${'a'.repeat(Math.min(count, 5))}...`);
+      }
+    }
+    if (adminState === 'WAITING_FOR_KEYS') {
+      const answers = text.toLowerCase();
+      if (answers.length === adminTempData.count) {
+        const testId = Math.floor(1000 + Math.random() * 9000).toString(); 
+        
+        tests[testId] = { 
+          title: adminTempData.topic,
+          count: adminTempData.count, 
+          keys: answers,
+          createdAt: Date.now() // Vaqtni saqlaymiz (24 soat uchun)
+        };
+        results[testId] = []; // Natijalar uchun bo'sh massiv
+        adminState = null; 
+        
+        return bot.sendMessage(adminId, `🎉 Test tayyor!\n\n📁 Mavzu: ${adminTempData.topic}\n📌 **Test ID: ${testId}**\n📝 Savollar: ${adminTempData.count} ta\n⏳ Vaqt: 24 soat faol.\n\nO'quvchilarga **${testId}** kodini bering.`, {parse_mode: 'Markdown'});
+      } else {
+        return bot.sendMessage(adminId, `⚠️ Javoblar soni aniq ${adminTempData.count} ta bo'lishi kerak. Siz ${answers.length} ta yozdingiz.`);
       }
     }
 
-    if (adminState === 'WAITING_FOR_KEYS') {
-      const answers = text.toLowerCase();
-      if (answers.length === tempTestCount) {
-        const testId = Math.floor(1000 + Math.random() * 9000).toString(); 
-        activeTests[testId] = { keys: answers, count: tempTestCount };
-        adminState = null; 
-        return bot.sendMessage(adminId, `🎉 Test tayyor!\n\n📌 **Test kodi: ${testId}**\n📝 Savollar soni: ${tempTestCount} ta\n🔑 Kalitlar: ${answers}\n\nO'quvchilarga shu kodni bering.`, {parse_mode: 'Markdown'});
-      } else {
-        return bot.sendMessage(adminId, `⚠️ Javoblar soni aniq ${tempTestCount} ta bo'lishi kerak. Siz ${answers.length} ta yozdingiz.`);
-      }
+    // 3. NATIJALARNI KO'RISH
+    if (text === '📊 Natijalarni ko\'rish') {
+      adminState = 'WAITING_TEST_ID_RESULTS';
+      return bot.sendMessage(adminId, `Qaysi test natijalarini ko'rmoqchisiz? Test ID sinini yozing:`);
     }
+    if (adminState === 'WAITING_TEST_ID_RESULTS') {
+      const testId = text;
+      if (!tests[testId]) {
+        return bot.sendMessage(adminId, `❌ Bunday ID ga ega test topilmadi.`);
+      }
+      
+      const testResults = results[testId] || [];
+      if (testResults.length === 0) {
+        adminState = null;
+        return bot.sendMessage(adminId, `📁 **${tests[testId].title}**\nHali hech kim bu testni yechmadi.`, {parse_mode: 'Markdown'});
+      }
+
+      // Natijalarni guruhlar bo'yicha taqsimlash
+      let grouped = {};
+      testResults.forEach(res => {
+        const groupName = groups[res.groupCode] || "Noma'lum guruh";
+        if (!grouped[groupName]) grouped[groupName] = [];
+        grouped[groupName].push(res);
+      });
+
+      let reportMsg = `📊 **Natijalar: ${tests[testId].title}** (ID: ${testId})\n\n`;
+      
+      for (let gName in grouped) {
+        reportMsg += `🏢 **--- ${gName} ---**\n`;
+        // Ballga qarab saralash (yuqoridan pastga)
+        grouped[gName].sort((a, b) => b.score - a.score);
+        grouped[gName].forEach((r, index) => {
+          reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count}\n`;
+        });
+        reportMsg += `\n`;
+      }
+
+      adminState = null;
+      return bot.sendMessage(adminId, reportMsg, {parse_mode: 'Markdown'});
+    }
+
+    // 4. BAZA HOLATI
+    if (text === '📋 Baza holati') {
+      return bot.sendMessage(adminId, `Tizim holati:\nJami guruhlar: ${Object.keys(groups).length} ta\nJami o'quvchilar: ${Object.keys(users).length} ta\nJami testlar: ${Object.keys(tests).length} ta`);
+    }
+    
     return;
   }
 
-  // --- FOYDALANUVCHI QISMI ---
+  // ================= FOYDALANUVCHI QISMI =================
   if (chatId !== adminId) {
     
-    // /start bosilganda tekshiruv
-    if (text === '/start') {
-      if (registeredUsers[chatId]) {
-        // Agar oldin ro'yxatdan o'tgan bo'lsa, to'g'ridan-to'g'ri test so'raymiz
-        return bot.sendMessage(chatId, `👋 Qaytganingiz bilan, ${registeredUsers[chatId]}!\n\nTest ishlash uchun **Test kodini** (masalan: 4092) yozib yuboring:`);
-      } else {
-        // Agar yangi foydalanuvchi bo'lsa, ismini so'raymiz
-        return bot.sendMessage(chatId, `Assalomu alaykum! Iltimos, **Ism va Familiyangizni** to'liq yozib yuboring:\n\n(Misol uchun: Aliyev Vali)`);
+    // Ro'yxatdan o'tgan bo'lsa
+    if (users[chatId]) {
+      if (text === '/start') {
+        return bot.sendMessage(chatId, `👋 Qaytganingiz bilan, ${users[chatId].name}!\n🏢 Guruhingiz: ${groups[users[chatId].groupCode]}\n\nTest ishlash uchun ustozingiz bergan **Test ID** sinini yozib yuboring:`, {parse_mode: 'Markdown'});
       }
+
+      // Test ishlash jarayoni
+      if (!userSessions[chatId] || userSessions[chatId].status === 'finished') {
+        const testId = text;
+        const testData = tests[testId];
+
+        if (testData) {
+          // 24 soatlik muddatni tekshirish
+          if (Date.now() - testData.createdAt > ONE_DAY_MS) {
+            return bot.sendMessage(chatId, `⏳ Kechirasiz, ushbu testning faollik muddati (24 soat) tugagan.`);
+          }
+          
+          // O'quvchi oldin bu testni ishlaganligini tekshirish
+          const alreadyTaken = results[testId].find(r => r.chatId === chatId);
+          if (alreadyTaken) {
+            return bot.sendMessage(chatId, `❌ Siz bu testni allaqachon ishlagansiz. Qayta ishlash mumkin emas.`);
+          }
+
+          userSessions[chatId] = { testId: testId, currentQuestion: 1, answers: [], status: 'active' };
+          sendQuestion(chatId);
+        } else {
+          bot.sendMessage(chatId, `❌ ${testId} kodli test topilmadi. Kodni to'g'ri yozganingizni tekshiring.`);
+        }
+      }
+      return;
     }
 
-    // Ismini xotiraga saqlash (faqat birinchi marta kiritganda)
-    if (!registeredUsers[chatId]) {
-      registeredUsers[chatId] = text;
-      return bot.sendMessage(chatId, `✅ Rahmat, ${text}!\n\nEndi test ishlash uchun ustozingiz bergan **Test kodini** yozib yuboring:`);
+    // --- RO'YXATDAN O'TISH JARAYONI ---
+    if (text === '/start') {
+      userRegState[chatId] = { step: 'WAITING_NAME' };
+      return bot.sendMessage(chatId, `Assalomu alaykum! Tizimdan foydalanish uchun **Ism va Familiyangizni** to'liq yozib yuboring:\n(Misol: Aliyev Vali)`, {parse_mode: 'Markdown'});
     }
 
-    // Test kodini qabul qilish va testni boshlash
-    if (!userSessions[chatId] || userSessions[chatId].status === 'finished') {
-      const testId = text;
-      if (activeTests[testId]) {
-        userSessions[chatId] = {
-          testId: testId,
-          currentQuestion: 1,
-          answers: [],
-          status: 'active'
-        };
-        sendQuestion(chatId);
+    if (userRegState[chatId]?.step === 'WAITING_NAME') {
+      userRegState[chatId].name = text;
+      userRegState[chatId].step = 'WAITING_CODE';
+      return bot.sendMessage(chatId, `✅ Rahmat!\n\nEndi guruhingizga qo'shilish uchun ustozingiz bergan **Guruh kirish kodini** yozib yuboring:`, {parse_mode: 'Markdown'});
+    }
+
+    if (userRegState[chatId]?.step === 'WAITING_CODE') {
+      const code = text.trim();
+      if (groups[code]) {
+        // Tizimga saqlash
+        users[chatId] = { name: userRegState[chatId].name, groupCode: code };
+        delete userRegState[chatId]; // Vaqtinchalik holatni tozalash
+        
+        return bot.sendMessage(chatId, `🎉 Tabriklaymiz, siz **${groups[code]}** guruhiga qabul qilindingiz!\n\nTest ishlash uchun **Test ID** raqamini yozib yuboring:`, {parse_mode: 'Markdown'});
       } else {
-        bot.sendMessage(chatId, `❌ ${testId} kodli test topilmadi. Kodni to'g'ri yozganingizni tekshiring.`);
+        return bot.sendMessage(chatId, `❌ Noto'g'ri kod! Bunday guruh tizimda yo'q. Iltimos, ustozingizdan kodni aniqlab qaytadan yozing:`);
       }
     }
   }
@@ -112,42 +222,43 @@ bot.on('callback_query', (query) => {
 
   if (!session || session.status !== 'active') return;
 
-  const testInfo = activeTests[session.testId];
+  const testInfo = tests[session.testId];
   
   session.answers.push(data);
   session.currentQuestion++;
 
   if (session.currentQuestion <= testInfo.count) {
-    bot.editMessageText(`📝 Test: ${session.testId}\n📌 Savol: ${session.currentQuestion} / ${testInfo.count}\n\nJavob variantini tanlang:`, {
+    bot.editMessageText(`📁 Mavzu: ${testInfo.title}\n📌 Savol: ${session.currentQuestion} / ${testInfo.count}\n\nJavob variantini tanlang:`, {
       chat_id: chatId,
       message_id: query.message.message_id,
       reply_markup: getKeyboard()
     });
   } else {
+    // TEST YAKUNLANDI
     session.status = 'finished';
     
     let score = 0;
-    let wrongIndexes = [];
     const correctAnswers = testInfo.keys;
 
     for (let i = 0; i < testInfo.count; i++) {
-      if (session.answers[i] === correctAnswers[i]) {
-        score++;
-      } else {
-        wrongIndexes.push(i + 1);
-      }
+      if (session.answers[i] === correctAnswers[i]) score++;
     }
 
-    const studentName = registeredUsers[chatId];
-    const userAnswersStr = session.answers.join('');
+    const userData = users[chatId];
+    
+    // Natijani bazaga saqlash (Adminga xabar yubormaymiz)
+    results[session.testId].push({
+      chatId: chatId,
+      name: userData.name,
+      groupCode: userData.groupCode,
+      score: score,
+      answers: session.answers.join('')
+    });
 
-    bot.editMessageText(`✅ Test yakunlandi!\nJavoblaringiz adminga yuborildi.`, {
+    bot.editMessageText(`🏁 Test yakunlandi!\n\n📁 Mavzu: ${testInfo.title}\n📊 Sizning natijangiz: ${score} / ${testInfo.count}\n\nJavoblaringiz qabul qilindi.`, {
       chat_id: chatId,
       message_id: query.message.message_id
     });
-
-    const resultMsg = `📊 Yangi natija!\n👤 O'quvchi: ${studentName}\n📝 Test kodi: ${session.testId}\n✅ To'g'ri: ${score}/${testInfo.count}\n❌ Xato savollar: ${wrongIndexes.length > 0 ? wrongIndexes.join(', ') : 'Yo\'q'}\n📥 O'quvchi javoblari: ${userAnswersStr}`;
-    bot.sendMessage(adminId, resultMsg);
   }
 
   bot.answerCallbackQuery(query.id);
@@ -164,9 +275,9 @@ function getKeyboard() {
 
 function sendQuestion(chatId) {
   const session = userSessions[chatId];
-  const total = activeTests[session.testId].count;
+  const testInfo = tests[session.testId];
   
-  bot.sendMessage(chatId, `📝 Test: ${session.testId}\n📌 Savol: ${session.currentQuestion} / ${total}\n\nJavob variantini tanlang:`, {
+  bot.sendMessage(chatId, `📁 Mavzu: ${testInfo.title}\n📌 Savol: ${session.currentQuestion} / ${testInfo.count}\n\nJavob variantini tanlang:`, {
     reply_markup: getKeyboard()
   });
 }
