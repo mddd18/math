@@ -25,7 +25,7 @@ let userSessions = {};
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// Admin klaviaturasi (Yangilangan)
+// Admin klaviaturasi
 const adminKeyboard = {
   reply_markup: {
     keyboard: [
@@ -101,7 +101,7 @@ bot.on('message', (msg) => {
       }
     }
 
-    // 3. GURUHLAR VA NATIJALAR MENYUSI (YANGI LOGIKA)
+    // 3. GURUHLAR VA NATIJALAR MENYUSI
     if (text === '👥 Guruhlar va Natijalar') {
       adminState = null;
       const groupCodes = Object.keys(groups);
@@ -193,7 +193,6 @@ bot.on('callback_query', (query) => {
 
   // --- ADMIN NAVIGATION QISMI ---
   if (chatId === adminId) {
-    // Guruhni bosganda testlar ro'yxatini chiqarish
     if (data.startsWith('admingrp_')) {
       const groupCode = data.split('_')[1];
       const groupName = groups[groupCode];
@@ -223,7 +222,6 @@ bot.on('callback_query', (query) => {
       });
     }
 
-    // Orqaga qaytish (Guruhlar ro'yxatiga)
     if (data === 'adminback_groups') {
       const groupCodes = Object.keys(groups);
       let inlineKeyboard = [];
@@ -238,7 +236,7 @@ bot.on('callback_query', (query) => {
       });
     }
 
-    // Bitta testning va bitta guruhning aniq natijasini ko'rsatish
+    // ADMINGA XATOLAR BIZAN BIRGA NATIJANI KO'RSATISH
     if (data.startsWith('adminres_')) {
       const parts = data.split('_');
       const testId = parts[1];
@@ -248,11 +246,16 @@ bot.on('callback_query', (query) => {
       students.sort((a, b) => b.score - a.score);
 
       let reportMsg = `📊 **Natijalar: ${tests[testId].title}**\n🏢 **Guruh: ${groups[groupCode]}**\n\n`;
+      
       students.forEach((r, index) => {
-        reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count}\n`;
+        // Xatolar matnini tayyorlash
+        let wrongText = r.wrongQuestions && r.wrongQuestions.length > 0 
+          ? `(Xatolar: ${r.wrongQuestions.join(', ')})` 
+          : `(Barchasi to'g'ri ✅)`;
+
+        reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count} ${wrongText}\n`;
       });
 
-      // Orqaga (shu guruhning testlariga) qaytish tugmasi
       let inlineKeyboard = [[{ text: '🔙 Testlar ro\'yxatiga qaytish', callback_data: `admingrp_${groupCode}` }]];
 
       return bot.editMessageText(reportMsg, {
@@ -282,12 +285,19 @@ bot.on('callback_query', (query) => {
       reply_markup: getKeyboard()
     });
   } else {
+    // TEST YAKUNLANDI (Natijalarni hisoblash va xatolarni aniqlash)
     session.status = 'finished';
+    
     let score = 0;
+    let wrongList = []; // Xato savollar raqamini saqlash uchun
     const correctAnswers = testInfo.keys;
 
     for (let i = 0; i < testInfo.count; i++) {
-      if (session.answers[i] === correctAnswers[i]) score++;
+      if (session.answers[i] === correctAnswers[i]) {
+        score++;
+      } else {
+        wrongList.push(i + 1); // 1-savoldan boshlangani uchun +1 qilinadi
+      }
     }
 
     const userData = users[chatId];
@@ -299,12 +309,15 @@ bot.on('callback_query', (query) => {
       chatId: chatId,
       name: userData.name,
       score: score,
+      wrongQuestions: wrongList, // Xatolar ro'yxatini ham saqlaymiz
       answers: session.answers.join('')
     });
 
-    bot.editMessageText(`🏁 Test yakunlandi!\n\n📁 Mavzu: ${testInfo.title}\n📊 Sizning natijangiz: ${score} / ${testInfo.count}\n\nJavoblaringiz qabul qilindi.`, {
+    // O'QUVCHIDAN NATIJANI YASHIRISH
+    bot.editMessageText(`🏁 **Test yakunlandi!**\n\n📁 Mavzu: ${testInfo.title}\n✅ Javoblaringiz muvaffaqiyatli qabul qilindi. Natijani ustozingiz e'lon qiladi.`, {
       chat_id: chatId,
-      message_id: query.message.message_id
+      message_id: query.message.message_id,
+      parse_mode: 'Markdown'
     });
   }
 
