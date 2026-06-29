@@ -12,12 +12,9 @@ const adminId = '903004024';
 const bot = new TelegramBot(token, {polling: true});
 
 // --- MA'LUMOTLAR BAZASI (Xotirada) ---
-let groups = {}; // { "5566": "101-guruh" }
-let users = {}; // { chatId: { name: "Ali", groupCode: "5566" } }
-let tests = {}; // { "1234": { title: "Matematika", count: 10, keys: "abcd...", createdAt: 168... } }
-
-// NATIJALAR BAZASI (Guruh kesimida saqlanadi)
-// Format: { "1234" (TestID): { "5566" (GuruhKodi): [ { name: "Ali", score: 8 } ] } }
+let groups = {}; 
+let users = {}; 
+let tests = {}; 
 let results = {}; 
 
 // Vaqtinchalik holatlar
@@ -28,12 +25,12 @@ let userSessions = {};
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-// Admin klaviaturasi
+// Admin klaviaturasi (Yangilangan)
 const adminKeyboard = {
   reply_markup: {
     keyboard: [
       [{ text: '📝 Yangi test yaratish' }, { text: '🏢 Yangi guruh yaratish' }],
-      [{ text: '📊 Natijalarni ko\'rish' }, { text: '📋 Baza holati' }]
+      [{ text: '👥 Guruhlar va Natijalar' }, { text: '📋 Baza holati' }]
     ],
     resize_keyboard: true
   }
@@ -95,8 +92,6 @@ bot.on('message', (msg) => {
           keys: answers,
           createdAt: Date.now()
         };
-        
-        // Test uchun bo'sh ob'ekt yaratamiz (ichiga guruhlar qo'shilib boradi)
         results[testId] = {}; 
         
         adminState = null; 
@@ -106,42 +101,23 @@ bot.on('message', (msg) => {
       }
     }
 
-    // 3. NATIJALARNI KO'RISH
-    if (text === '📊 Natijalarni ko\'rish') {
-      adminState = 'WAITING_TEST_ID_RESULTS';
-      return bot.sendMessage(adminId, `Qaysi test natijalarini ko'rmoqchisiz? Test ID sinini yozing:`);
-    }
-    if (adminState === 'WAITING_TEST_ID_RESULTS') {
-      const testId = text;
-      if (!tests[testId]) {
-        return bot.sendMessage(adminId, `❌ Bunday ID ga ega test topilmadi.`);
-      }
-      
-      const testResultsByGroup = results[testId];
-      if (!testResultsByGroup || Object.keys(testResultsByGroup).length === 0) {
-        adminState = null;
-        return bot.sendMessage(adminId, `📁 **${tests[testId].title}**\nHali hech kim bu testni yechmadi.`, {parse_mode: 'Markdown'});
-      }
-
-      let reportMsg = `📊 **Natijalar: ${tests[testId].title}** (ID: ${testId})\n\n`;
-      
-      // Guruhlar bo'ylab aylanib chiqamiz
-      for (let gCode in testResultsByGroup) {
-        const gName = groups[gCode] || "Noma'lum guruh (O'chirilgan)";
-        reportMsg += `🏢 **--- ${gName} ---**\n`;
-        
-        // O'sha guruh o'quvchilarini olamiz va balliga qarab saralaymiz
-        let students = testResultsByGroup[gCode];
-        students.sort((a, b) => b.score - a.score);
-        
-        students.forEach((r, index) => {
-          reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count}\n`;
-        });
-        reportMsg += `\n`;
-      }
-
+    // 3. GURUHLAR VA NATIJALAR MENYUSI (YANGI LOGIKA)
+    if (text === '👥 Guruhlar va Natijalar') {
       adminState = null;
-      return bot.sendMessage(adminId, reportMsg, {parse_mode: 'Markdown'});
+      const groupCodes = Object.keys(groups);
+      
+      if (groupCodes.length === 0) {
+        return bot.sendMessage(adminId, `⚠️ Hozircha tizimda guruhlar yo'q.`);
+      }
+
+      let inlineKeyboard = [];
+      groupCodes.forEach(code => {
+        inlineKeyboard.push([{ text: `🏢 ${groups[code]}`, callback_data: `admingrp_${code}` }]);
+      });
+
+      return bot.sendMessage(adminId, `📊 Qaysi guruh natijalarini ko'rmoqchisiz? Tanlang:`, {
+        reply_markup: { inline_keyboard: inlineKeyboard }
+      });
     }
 
     // 4. BAZA HOLATI
@@ -154,25 +130,20 @@ bot.on('message', (msg) => {
 
   // ================= FOYDALANUVCHI QISMI =================
   if (chatId !== adminId) {
-    
-    // Ro'yxatdan o'tgan bo'lsa
     if (users[chatId]) {
       if (text === '/start') {
         return bot.sendMessage(chatId, `👋 Qaytganingiz bilan, ${users[chatId].name}!\n🏢 Guruhingiz: ${groups[users[chatId].groupCode]}\n\nTest ishlash uchun ustozingiz bergan **Test ID** sinini yozib yuboring:`, {parse_mode: 'Markdown'});
       }
 
-      // Test ishlash jarayoni
       if (!userSessions[chatId] || userSessions[chatId].status === 'finished') {
         const testId = text;
         const testData = tests[testId];
 
         if (testData) {
-          // 24 soatlik limitni tekshirish
           if (Date.now() - testData.createdAt > ONE_DAY_MS) {
             return bot.sendMessage(chatId, `⏳ Kechirasiz, ushbu testning faollik muddati (24 soat) tugagan.`);
           }
           
-          // O'quvchi oldin bu testni ishlaganligini tekshirish
           const groupResults = results[testId][users[chatId].groupCode] || [];
           const alreadyTaken = groupResults.find(r => r.chatId === chatId);
           
@@ -189,7 +160,6 @@ bot.on('message', (msg) => {
       return;
     }
 
-    // --- RO'YXATDAN O'TISH JARAYONI ---
     if (text === '/start') {
       userRegState[chatId] = { step: 'WAITING_NAME' };
       return bot.sendMessage(chatId, `Assalomu alaykum! Tizimdan foydalanish uchun **Ism va Familiyangizni** to'liq yozib yuboring:\n(Misol: Aliyev Vali)`, {parse_mode: 'Markdown'});
@@ -206,7 +176,6 @@ bot.on('message', (msg) => {
       if (groups[code]) {
         users[chatId] = { name: userRegState[chatId].name, groupCode: code };
         delete userRegState[chatId]; 
-        
         return bot.sendMessage(chatId, `🎉 Tabriklaymiz, siz **${groups[code]}** guruhiga qabul qilindingiz!\n\nTest ishlash uchun **Test ID** raqamini yozib yuboring:`, {parse_mode: 'Markdown'});
       } else {
         return bot.sendMessage(chatId, `❌ Noto'g'ri kod! Bunday guruh tizimda yo'q. Iltimos, ustozingizdan kodni aniqlab qaytadan yozing:`);
@@ -216,17 +185,93 @@ bot.on('message', (msg) => {
 });
 
 // ==========================================
-// INLINE TUGMALARNI BOSHQARISH (A, B, C, D)
+// INLINE TUGMALARNI BOSHQARISH
 // ==========================================
 bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id.toString();
   const data = query.data; 
-  const session = userSessions[chatId];
 
+  // --- ADMIN NAVIGATION QISMI ---
+  if (chatId === adminId) {
+    // Guruhni bosganda testlar ro'yxatini chiqarish
+    if (data.startsWith('admingrp_')) {
+      const groupCode = data.split('_')[1];
+      const groupName = groups[groupCode];
+
+      let solvedTests = [];
+      for (let testId in results) {
+        if (results[testId][groupCode] && results[testId][groupCode].length > 0) {
+          solvedTests.push(testId);
+        }
+      }
+
+      if (solvedTests.length === 0) {
+        return bot.answerCallbackQuery(query.id, { text: `Bu guruh hali hech qanday test yechmagan.`, show_alert: true });
+      }
+
+      let inlineKeyboard = [];
+      solvedTests.forEach(testId => {
+        inlineKeyboard.push([{ text: `📁 ${tests[testId].title} (${testId})`, callback_data: `adminres_${testId}_${groupCode}` }]);
+      });
+      inlineKeyboard.push([{ text: '🔙 Guruhlarga qaytish', callback_data: 'adminback_groups' }]);
+
+      return bot.editMessageText(`🏢 **${groupName}** guruhi yechgan testlar:\nQaysi birini ko'rmoqchisiz?`, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        reply_markup: { inline_keyboard: inlineKeyboard },
+        parse_mode: 'Markdown'
+      });
+    }
+
+    // Orqaga qaytish (Guruhlar ro'yxatiga)
+    if (data === 'adminback_groups') {
+      const groupCodes = Object.keys(groups);
+      let inlineKeyboard = [];
+      groupCodes.forEach(code => {
+        inlineKeyboard.push([{ text: `🏢 ${groups[code]}`, callback_data: `admingrp_${code}` }]);
+      });
+
+      return bot.editMessageText(`📊 Qaysi guruh natijalarini ko'rmoqchisiz? Tanlang:`, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        reply_markup: { inline_keyboard: inlineKeyboard }
+      });
+    }
+
+    // Bitta testning va bitta guruhning aniq natijasini ko'rsatish
+    if (data.startsWith('adminres_')) {
+      const parts = data.split('_');
+      const testId = parts[1];
+      const groupCode = parts[2];
+      
+      let students = results[testId][groupCode] || [];
+      students.sort((a, b) => b.score - a.score);
+
+      let reportMsg = `📊 **Natijalar: ${tests[testId].title}**\n🏢 **Guruh: ${groups[groupCode]}**\n\n`;
+      students.forEach((r, index) => {
+        reportMsg += `  ${index + 1}. ${r.name} — ${r.score}/${tests[testId].count}\n`;
+      });
+
+      // Orqaga (shu guruhning testlariga) qaytish tugmasi
+      let inlineKeyboard = [[{ text: '🔙 Testlar ro\'yxatiga qaytish', callback_data: `admingrp_${groupCode}` }]];
+
+      return bot.editMessageText(reportMsg, {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        reply_markup: { inline_keyboard: inlineKeyboard },
+        parse_mode: 'Markdown'
+      });
+    }
+    
+    bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  // --- O'QUVCHI TEST ISHLASH QISMI ---
+  const session = userSessions[chatId];
   if (!session || session.status !== 'active') return;
 
   const testInfo = tests[session.testId];
-  
   session.answers.push(data);
   session.currentQuestion++;
 
@@ -237,9 +282,7 @@ bot.on('callback_query', (query) => {
       reply_markup: getKeyboard()
     });
   } else {
-    // TEST YAKUNLANDI
     session.status = 'finished';
-    
     let score = 0;
     const correctAnswers = testInfo.keys;
 
@@ -248,10 +291,8 @@ bot.on('callback_query', (query) => {
     }
 
     const userData = users[chatId];
-    
-    // Natijani Guruh Kesimida bazaga saqlash
     if (!results[session.testId][userData.groupCode]) {
-      results[session.testId][userData.groupCode] = []; // Agar guruh ro'yxati hali ochilmagan bo'lsa, ochamiz
+      results[session.testId][userData.groupCode] = [];
     }
 
     results[session.testId][userData.groupCode].push({
